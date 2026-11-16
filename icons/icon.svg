@@ -1,0 +1,15 @@
+<!--
+  FocusPause extension icon: pause bars inside focus brackets.
+  Chrome uses the PNG rasters (16, 32, 48, 128). This SVG is the source.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="28" fill="#14302C"/>
+  <g fill="none" stroke="#E8B03A" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 48 V22 H48"/>
+    <path d="M80 22 H106 V48"/>
+    <path d="M106 80 V106 H80"/>
+    <path d="M48 106 H22 V80"/>
+  </g>
+  <rect x="43" y="36" width="16" height="56" rx="5" fill="#F4EFE6"/>
+  <rect x="69" y="36" width="16" height="56" rx="5" fill="#F4EFE6"/>
+</svg>
