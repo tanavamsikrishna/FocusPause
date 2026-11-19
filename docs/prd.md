@@ -22,7 +22,7 @@ Pause means the media element stops. It is not a tab mute, and it is not a zero 
 
 Resume only media this extension stopped or blocked. Media the user or the page had already paused stays paused. A pause while the tab is allowed is the user's or the player's own pause and is not resumed. A pause while the tab is denied does not cancel the resume, because players echo pause after ours.
 
-If resume is rejected, retry on the next click or keypress in that frame.
+If resume is rejected for lack of user activation (`NotAllowedError`), retry on the next click or keypress in that frame. Other rejections (for example `AbortError` or `NotSupportedError`) are not retried.
 
 While a tab is denied, a later `play()` from the page must not start playback. Players such as YouTube call `play()` again from their pause handler. That blocked media resumes when the tab is allowed again.
 

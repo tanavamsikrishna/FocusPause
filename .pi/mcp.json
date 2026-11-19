@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "browseros-neo": {
-      "enabled": true
+      "enabled": false
     }
   }
 }

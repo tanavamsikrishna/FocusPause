@@ -43,7 +43,14 @@ async function applyWindow(windowId) {
 }
 
 async function reconcileFromChrome() {
-  const win = await chrome.windows.getLastFocused();
+  let win = null;
+  try {
+    win = await chrome.windows.getLastFocused();
+  } catch {
+    // Chrome throws "No last-focused window" before any window has been
+    // focused (e.g. at startup). Treat it as no window focused.
+    win = null;
+  }
   if (!win?.focused) {
     await applyWindow(WINDOW_ID_NONE);
     return;

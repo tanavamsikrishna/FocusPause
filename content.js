@@ -11,14 +11,38 @@
 
   const session = globalThis.FocusPauseMedia.createMediaSession(collectMedia);
   const boundShadows = new WeakSet();
+  // Cache of hosts already probed: calling chrome.dom.openOrClosedShadowRoot()
+  // on every node on every mutation is a known performance cliff (per-node
+  // browser round-trip, worse on nodes with children). Probe each host once.
+  const probedHosts = new WeakSet();
+  const shadowByHost = new WeakMap();
 
-  function shadowRootOf(el) {
+  function shadowRootOf(el, force = false) {
+    if (!el || typeof el !== 'object') return null;
     if (el.shadowRoot) return el.shadowRoot;
-    try {
-      return chrome.dom?.openOrClosedShadowRoot?.(el) ?? null;
-    } catch {
+    if (shadowByHost.has(el)) return shadowByHost.get(el);
+    // force (used by collectMedia on allow/deny, a rare event) re-probes
+    // custom-element hosts so a shadow attached after the mutation scan
+    // is still found when it matters.
+    if (probedHosts.has(el) && !force) return null;
+    // Only custom elements can host a (closed) shadow root in practice.
+    // Skipping all other elements avoids the per-node API call entirely on
+    // ordinary pages; their tag names never gain a '-' later.
+    if (typeof el.tagName !== 'string' || !el.tagName.includes('-')) {
+      probedHosts.add(el);
       return null;
     }
+    try {
+      const root = chrome.dom?.openOrClosedShadowRoot?.(el) ?? null;
+      if (root) {
+        shadowByHost.set(el, root);
+        return root;
+      }
+    } catch {
+      // Fall through: treat as no shadow root.
+    }
+    probedHosts.add(el);
+    return null;
   }
 
   function collectMedia() {
@@ -30,7 +54,7 @@
       roots.add(root);
       for (const el of root.querySelectorAll('video, audio')) found.push(el);
       for (const el of root.querySelectorAll('*')) {
-        const shadow = shadowRootOf(el);
+        const shadow = shadowRootOf(el, true);
         if (shadow) walk(shadow);
       }
     }
@@ -45,15 +69,56 @@
     root.addEventListener('pause', session.onPause, true);
   }
 
-  function bindShadows(root) {
-    if (!root || typeof root.querySelectorAll !== 'function') return;
-    for (const el of root.querySelectorAll('*')) {
-      const shadow = shadowRootOf(el);
-      if (!shadow || boundShadows.has(shadow)) continue;
-      boundShadows.add(shadow);
-      bind(shadow);
-      bindShadows(shadow);
+  // Scan one root (document, shadow root, or a newly added subtree) and
+  // bind any shadow roots found. Each host is probed at most once thanks
+  // to probedHosts / shadowByHost, so re-scanning a visited host is cheap.
+  // Walk childNodes directly instead of querySelectorAll('*'): frameworks
+  // that insert items one-by-one produce one added node per item, and a
+  // selector query per node costs ~1ms each in a large document — that
+  // alone was ~135ms per Adding100Items batch in Speedometer.
+  function scanRoot(root) {
+    if (!root || typeof root !== 'object') return;
+    const stack = [root];
+    while (stack.length) {
+      const node = stack.pop();
+      if (!node || typeof node !== 'object') continue;
+      if (node.nodeType === 1) {
+        const shadow = shadowRootOf(node);
+        if (shadow && !boundShadows.has(shadow)) {
+          boundShadows.add(shadow);
+          bind(shadow);
+          observeShadow(shadow);
+          stack.push(shadow);
+        }
+      }
+      const children = node.childNodes;
+      if (!children) continue;
+      for (let i = children.length - 1; i >= 0; i--) stack.push(children[i]);
     }
+  }
+
+  function scanNode(node) {
+    if (!node || node.nodeType === 1) {
+      scanRoot(node);
+      return;
+    }
+    if (node.nodeType === 9 || node.nodeType === 11) scanRoot(node);
+  }
+
+  function handleMutations(mutations) {
+    for (const mutation of mutations) {
+      // Scan only what was added, not the whole document per mutation.
+      for (const node of mutation.addedNodes || []) scanNode(node);
+    }
+  }
+
+  function observeShadow(shadow) {
+    // Content inserted inside a shadow root never reaches the document
+    // observer, so each bound shadow root gets its own observer.
+    new MutationObserver(handleMutations).observe(shadow, {
+      childList: true,
+      subtree: true,
+    });
   }
 
   bind(document);
@@ -61,9 +126,11 @@
   function armObserver() {
     const root = document.documentElement;
     if (!root) return;
-    bindShadows(root);
-    const observer = new MutationObserver(() => bindShadows(document));
-    observer.observe(root, { childList: true, subtree: true });
+    scanRoot(document);
+    new MutationObserver(handleMutations).observe(root, {
+      childList: true,
+      subtree: true,
+    });
   }
 
   if (document.documentElement) armObserver();
